@@ -8,7 +8,7 @@ import logging
 import numpy as np
 import torch
 from tqdm import tqdm
-from core.raft import RAFT, autocast
+from core.igev_stereo import IGEVStereo, autocast
 import core.stereo_datasets as datasets
 from core.utils.utils import InputPadder
 from PIL import Image
@@ -36,7 +36,7 @@ def validate_eth3d(model, iters=32, mixed_prec=False):
         image1, image2 = padder.pad(image1, image2)
 
         with autocast(enabled=mixed_prec):
-            _, flow_pr = model(image1, image2, iters=iters, test_mode=True)
+            flow_pr = model(image1, image2, iters=iters, test_mode=True)
         flow_pr = padder.unpad(flow_pr.float()).cpu().squeeze(0)
         assert flow_pr.shape == flow_gt.shape, (flow_pr.shape, flow_gt.shape)
         epe = torch.sum((flow_pr - flow_gt)**2, dim=0).sqrt()
@@ -63,6 +63,7 @@ def validate_eth3d(model, iters=32, mixed_prec=False):
     print("Validation ETH3D: EPE %f, D1 %f" % (epe, d1))
     return {'eth3d-epe': epe, 'eth3d-d1': d1}
 
+
 @torch.no_grad()
 def validate_kitti(model, iters=32, mixed_prec=False, year=2015):
     """ Peform validation using the KITTI (train) split """
@@ -82,7 +83,7 @@ def validate_kitti(model, iters=32, mixed_prec=False, year=2015):
 
         with autocast(enabled=mixed_prec):
             start = time.time()
-            _, flow_pr = model(image1, image2, iters=iters, test_mode=True)
+            flow_pr = model(image1, image2, iters=iters, test_mode=True)
             end = time.time()
 
         if val_id > 50:
@@ -114,6 +115,7 @@ def validate_kitti(model, iters=32, mixed_prec=False, year=2015):
     print(f"Validation KITTI {year}: EPE {epe}, D1 {d1}, {format(avg_runtime, '.3f')}s")
     return {f'kitti{year}-epe': epe, f'kitti{year}-d1': d1}
 
+
 @torch.no_grad()
 def validate_sceneflow(model, iters=32, mixed_prec=False):
     """ Peform validation using the Scene Flow (TEST) split """
@@ -131,10 +133,11 @@ def validate_sceneflow(model, iters=32, mixed_prec=False):
         image1, image2 = padder.pad(image1, image2)
 
         with autocast(enabled=mixed_prec):
-            _, flow_pr = model(image1, image2, iters=iters, test_mode=True)
+            flow_pr = model(image1, image2, iters=iters, test_mode=True)
         flow_pr = padder.unpad(flow_pr).cpu().squeeze(0)
         assert flow_pr.shape == flow_gt.shape, (flow_pr.shape, flow_gt.shape)
 
+        # epe = torch.sum((flow_pr - flow_gt)**2, dim=0).sqrt()
         epe = torch.abs(flow_pr - flow_gt)
 
         epe = epe.flatten()
@@ -142,7 +145,6 @@ def validate_sceneflow(model, iters=32, mixed_prec=False):
 
         if(np.isnan(epe[val].mean().item())):
             continue
-
         out = (epe > 3.0)
         epe_list.append(epe[val].mean().item())
         out_list.append(out[val].cpu().numpy())
@@ -155,6 +157,7 @@ def validate_sceneflow(model, iters=32, mixed_prec=False):
 
     print("Validation Scene Flow: %f, %f" % (epe, d1))
     return {'scene-flow-epe': epe, 'scene-flow-d1': d1}
+
 
 @torch.no_grad()
 def validate_middlebury(model, iters=32, split='MiddEval3', mixed_prec=False, resolution='F'):
@@ -173,7 +176,7 @@ def validate_middlebury(model, iters=32, split='MiddEval3', mixed_prec=False, re
         image1, image2 = padder.pad(image1, image2)
 
         with autocast(enabled=mixed_prec):
-            _, flow_pr = model(image1, image2, iters=iters, test_mode=True)
+            flow_pr = model(image1, image2, iters=iters, test_mode=True)
         flow_pr = padder.unpad(flow_pr).cpu().squeeze(0)
 
         assert flow_pr.shape == flow_gt.shape, (flow_pr.shape, flow_gt.shape)
@@ -201,25 +204,27 @@ def validate_middlebury(model, iters=32, split='MiddEval3', mixed_prec=False, re
     print(f"Validation Middlebury{resolution}: EPE {epe}, D1 {d1}")
     return {f'middlebury{split}-epe': epe, f'middlebury{split}-d1': d1}
 
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--restore_ckpt', help="restore checkpoint", default=None)
-    parser.add_argument('--dataset', default='sceneflow', help="dataset for evaluation", choices=["eth3d", "kitti", "sceneflow", "middlebury"])
+    parser.add_argument('--dataset', help="dataset for evaluation", default='eth3d', choices=["eth3d", "kitti", "sceneflow", "middlebury"])
     parser.add_argument('--mixed_precision', action='store_true', help='use mixed precision')
     parser.add_argument('--valid_iters', type=int, default=32, help='number of flow-field updates during forward pass')
 
     # Architecure choices
-    parser.add_argument('--hidden_dim', type=int, default=128, help="hidden state and context dimensions")
+    parser.add_argument('--hidden_dims', nargs='+', type=int, default=[128]*3, help="hidden state and context dimensions")
     parser.add_argument('--corr_implementation', choices=["reg", "alt", "reg_cuda", "alt_cuda"], default="reg", help="correlation volume implementation")
     parser.add_argument('--shared_backbone', action='store_true', help="use a single backbone for the context and feature encoders")
-    parser.add_argument('--corr_levels', type=int, default=4, help="number of levels in the correlation pyramid")
+    parser.add_argument('--corr_levels', type=int, default=2, help="number of levels in the correlation pyramid")
     parser.add_argument('--corr_radius', type=int, default=4, help="width of the correlation pyramid")
     parser.add_argument('--n_downsample', type=int, default=2, help="resolution of the disparity field (1/2^K)")
     parser.add_argument('--slow_fast_gru', action='store_true', help="iterate the low-res GRUs more frequently")
     parser.add_argument('--n_gru_layers', type=int, default=3, help="number of hidden GRU levels")
+    parser.add_argument('--max_disp', type=int, default=192, help="max disp of geometry encoding volume")
     args = parser.parse_args()
 
-    model = torch.nn.DataParallel(RAFT(args), device_ids=[0])
+    model = torch.nn.DataParallel(IGEVStereo(args), device_ids=[0])
 
     logging.basicConfig(level=logging.INFO,
                         format='%(asctime)s %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s')
@@ -235,21 +240,17 @@ if __name__ == '__main__':
     model.eval()
 
     print(f"The model has {format(count_parameters(model)/1e6, '.2f')}M learnable parameters.")
-
-    # The CUDA implementations of the correlation volume prevent half-precision
-    # rounding errors in the correlation lookup. This allows us to use mixed precision
-    # in the entire forward pass, not just in the GRUs & feature extractors. 
     use_mixed_precision = args.corr_implementation.endswith("_cuda")
 
     if args.dataset == 'eth3d':
         validate_eth3d(model, iters=args.valid_iters, mixed_prec=use_mixed_precision)
 
     if args.dataset == 'kitti':
-        validate_kitti(model, iters=args.valid_iters, mixed_prec=use_mixed_precision, year=2012)
-        validate_kitti(model, iters=args.valid_iters, mixed_prec=use_mixed_precision, year=2015)
+        validate_kitti(model, iters=args.valid_iters, mixed_prec=use_mixed_precision)
 
     if args.dataset == 'middlebury':
-        validate_middlebury(model, iters=args.valid_iters, mixed_prec=use_mixed_precision, resolution='F')
+        validate_middlebury(model, iters=args.valid_iters, mixed_prec=use_mixed_precision, resolution='H')
+        validate_middlebury(model, iters=args.valid_iters, mixed_prec=use_mixed_precision, resolution='Q')
 
     if args.dataset == 'sceneflow':
         validate_sceneflow(model, iters=args.valid_iters, mixed_prec=use_mixed_precision)

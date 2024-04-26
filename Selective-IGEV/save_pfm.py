@@ -1,21 +1,21 @@
 import sys
 sys.path.append('core')
-
+import os
 import argparse
 import glob
 import numpy as np
 import torch
 from tqdm import tqdm
 from pathlib import Path
-from core.raft import RAFT
-from utils.utils import InputPadder
+from core.igev_stereo import IGEVStereo
+from core.utils.utils import InputPadder
 from PIL import Image
+from matplotlib import pyplot as plt
 import os
-import skimage.io
 
 DEVICE = 'cuda'
-
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
 
 def load_image(imfile):
     img = np.array(Image.open(imfile)).astype(np.uint8)[..., :3]
@@ -23,7 +23,7 @@ def load_image(imfile):
     return img[None].to(DEVICE)
 
 def demo(args):
-    model = torch.nn.DataParallel(RAFT(args), device_ids=[0])
+    model = torch.nn.DataParallel(IGEVStereo(args), device_ids=[0])
     model.load_state_dict(torch.load(args.restore_ckpt))
 
     model = model.module
@@ -41,14 +41,36 @@ def demo(args):
         for (imfile1, imfile2) in tqdm(list(zip(left_images, right_images))):
             image1 = load_image(imfile1)
             image2 = load_image(imfile2)
+
             padder = InputPadder(image1.shape, divis_by=32)
             image1, image2 = padder.pad(image1, image2)
-            _, disp = model(image1, image2, iters=args.valid_iters, test_mode=True)
-            disp = padder.unpad(disp)
-            file_stem = os.path.join(output_directory, imfile1.split('/')[-1])
-            disp = disp.cpu().numpy().squeeze()
-            disp = np.round(-disp * 256).astype(np.uint16)
-            skimage.io.imsave(file_stem, disp)
+
+            starter.record()
+            disp = model(image1, image2, iters=args.valid_iters, test_mode=True)
+
+            ender.record()
+            torch.cuda.synchronize()
+            curr_time = starter.elapsed_time(ender)
+
+            disp = disp.cpu().numpy()
+            disp = padder.unpad(disp).squeeze()
+            file_stem = imfile1.split('/')[-2]
+            filedir = Path(os.path.join(output_directory, file_stem))
+            filedir.mkdir(exist_ok=True)
+            filename = os.path.join(output_directory, file_stem, 'disp0Selective-IGEV.pfm')
+            with open(filename, 'wb') as f:
+                H, W = disp.shape
+                headers = ["Pf\n", f"{W} {H}\n", "-1\n"]
+                for header in headers:
+                    f.write(str.encode(header))
+                array = np.flip(disp, axis=0).astype(np.float32)
+                f.write(array.tobytes())
+
+            filename = os.path.join(output_directory, file_stem, 'timeSelective-IGEV.txt')
+            with open(filename, 'wb') as f:
+                time = '%.2f' % (curr_time / 1000)
+                f.write(str.encode(time))
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -61,14 +83,15 @@ if __name__ == '__main__':
     parser.add_argument('--valid_iters', type=int, default=32, help='number of flow-field updates during forward pass')
 
     # Architecture choices
-    parser.add_argument('--hidden_dim', nargs='+', type=int, default=128, help="hidden state and context dimensions")
+    parser.add_argument('--hidden_dims', nargs='+', type=int, default=[128]*3, help="hidden state and context dimensions")
     parser.add_argument('--corr_implementation', choices=["reg", "alt", "reg_cuda", "alt_cuda"], default="reg", help="correlation volume implementation")
     parser.add_argument('--shared_backbone', action='store_true', help="use a single backbone for the context and feature encoders")
-    parser.add_argument('--corr_levels', type=int, default=4, help="number of levels in the correlation pyramid")
+    parser.add_argument('--corr_levels', type=int, default=2, help="number of levels in the correlation pyramid")
     parser.add_argument('--corr_radius', type=int, default=4, help="width of the correlation pyramid")
     parser.add_argument('--n_downsample', type=int, default=2, help="resolution of the disparity field (1/2^K)")
     parser.add_argument('--slow_fast_gru', action='store_true', help="iterate the low-res GRUs more frequently")
     parser.add_argument('--n_gru_layers', type=int, default=3, help="number of hidden GRU levels")
+    parser.add_argument('--max_disp', type=int, default=384, help="max disp of geometry encoding volume")
     
     args = parser.parse_args()
 
