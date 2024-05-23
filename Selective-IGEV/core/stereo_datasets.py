@@ -17,10 +17,6 @@ import os.path as osp
 from core.utils import frame_utils
 from core.utils.augmentor import FlowAugmentor, SparseFlowAugmentor
 
-from skimage.io import imread
-from skimage.feature import canny
-import matplotlib.pyplot as plt
-
 class StereoDataset(data.Dataset):
     def __init__(self, aug_params=None, sparse=False, reader=None):
         self.augmentor = None
@@ -78,7 +74,7 @@ class StereoDataset(data.Dataset):
         img1 = np.array(img1).astype(np.uint8)
         img2 = np.array(img2).astype(np.uint8)
         disp = np.array(disp).astype(np.float32)
-        flow = np.stack([-disp, np.zeros_like(disp)], axis=-1)
+        flow = np.stack([disp, np.zeros_like(disp)], axis=-1)
 
         if len(img1.shape) == 2:
             img1 = np.tile(img1[...,None], (1, 1, 3))
