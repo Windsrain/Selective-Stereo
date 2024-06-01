@@ -121,36 +121,31 @@ def validate_sceneflow(model, iters=32, mixed_prec=False):
     """ Peform validation using the Scene Flow (TEST) split """
     model.eval()
     val_dataset = datasets.SceneFlowDatasets(dstype='frames_finalpass', things_test=True)
+    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=8, pin_memory=True, shuffle=False, num_workers=8, drop_last=False)
 
     out_list, epe_list, rmae_list = [], [], []
-    for val_id in tqdm(range(len(val_dataset))):
-        _, image1, image2, flow_gt, valid_gt = val_dataset[val_id]
-
-        image1 = image1[None].cuda()
-        image2 = image2[None].cuda()
+    for i_batch, (_, *data_blob) in enumerate(tqdm(val_loader)):
+        image1, image2, flow_gt, valid_gt = [x.cuda() for x in data_blob]
 
         padder = InputPadder(image1.shape, divis_by=32)
         image1, image2 = padder.pad(image1, image2)
 
         with autocast(enabled=mixed_prec):
             flow_pr = model(image1, image2, iters=iters, test_mode=True)
-        flow_pr = padder.unpad(flow_pr).cpu().squeeze(0)
+        flow_pr = padder.unpad(flow_pr)
         assert flow_pr.shape == flow_gt.shape, (flow_pr.shape, flow_gt.shape)
 
-        # epe = torch.sum((flow_pr - flow_gt)**2, dim=0).sqrt()
         epe = torch.abs(flow_pr - flow_gt)
 
         epe = epe.flatten()
         val = (valid_gt.flatten() >= 0.5) & (flow_gt.abs().flatten() < 192)
 
-        if(np.isnan(epe[val].mean().item())):
-            continue
-        out = (epe > 3.0)
+        out = (epe > 3.0).float()
         epe_list.append(epe[val].mean().item())
-        out_list.append(out[val].cpu().numpy())
+        out_list.append(out[val].mean().item())
 
     epe_list = np.array(epe_list)
-    out_list = np.concatenate(out_list)
+    out_list = np.array(out_list)
 
     epe = np.mean(epe_list)
     d1 = 100 * np.mean(out_list)
@@ -208,7 +203,7 @@ def validate_middlebury(model, iters=32, split='MiddEval3', mixed_prec=False, re
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--restore_ckpt', help="restore checkpoint", default=None)
-    parser.add_argument('--dataset', help="dataset for evaluation", default='eth3d', choices=["eth3d", "kitti", "sceneflow", "middlebury"])
+    parser.add_argument('--dataset', help="dataset for evaluation", default='sceneflow', choices=["eth3d", "kitti", "sceneflow", "middlebury"])
     parser.add_argument('--mixed_precision', action='store_true', help='use mixed precision')
     parser.add_argument('--valid_iters', type=int, default=32, help='number of flow-field updates during forward pass')
 

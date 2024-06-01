@@ -119,20 +119,18 @@ def validate_sceneflow(model, iters=32, mixed_prec=False):
     """ Peform validation using the Scene Flow (TEST) split """
     model.eval()
     val_dataset = datasets.SceneFlowDatasets(dstype='frames_finalpass', things_test=True)
+    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=8, pin_memory=True, shuffle=False, num_workers=8, drop_last=False)
 
     out_list, epe_list, rmae_list = [], [], []
-    for val_id in tqdm(range(len(val_dataset))):
-        _, image1, image2, flow_gt, valid_gt = val_dataset[val_id]
-
-        image1 = image1[None].cuda()
-        image2 = image2[None].cuda()
+    for i_batch, (_, *data_blob) in enumerate(tqdm(val_loader)):
+        image1, image2, flow_gt, valid_gt = [x.cuda() for x in data_blob]
 
         padder = InputPadder(image1.shape, divis_by=32)
         image1, image2 = padder.pad(image1, image2)
 
         with autocast(enabled=mixed_prec):
             _, flow_pr = model(image1, image2, iters=iters, test_mode=True)
-        flow_pr = padder.unpad(flow_pr).cpu().squeeze(0)
+        flow_pr = padder.unpad(flow_pr)
         assert flow_pr.shape == flow_gt.shape, (flow_pr.shape, flow_gt.shape)
 
         epe = torch.abs(flow_pr - flow_gt)
@@ -140,15 +138,12 @@ def validate_sceneflow(model, iters=32, mixed_prec=False):
         epe = epe.flatten()
         val = (valid_gt.flatten() >= 0.5) & (flow_gt.abs().flatten() < 192)
 
-        if(np.isnan(epe[val].mean().item())):
-            continue
-
-        out = (epe > 3.0)
+        out = (epe > 3.0).float()
         epe_list.append(epe[val].mean().item())
-        out_list.append(out[val].cpu().numpy())
+        out_list.append(out[val].mean().item())
 
     epe_list = np.array(epe_list)
-    out_list = np.concatenate(out_list)
+    out_list = np.array(out_list)
 
     epe = np.mean(epe_list)
     d1 = 100 * np.mean(out_list)
