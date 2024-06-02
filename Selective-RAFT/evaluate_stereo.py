@@ -179,7 +179,7 @@ def validate_middlebury(model, iters=32, split='MiddEval3', mixed_prec=False, re
         occ_mask = Image.open(imageL_file.replace('im0.png', 'mask0nocc.png')).convert('L')
         occ_mask = np.ascontiguousarray(occ_mask, dtype=np.float32).flatten()
 
-        val = (valid_gt.reshape(-1) >= 0.5) & (flow_gt[0].reshape(-1) < 192) & (occ_mask==255)
+        val = (valid_gt.reshape(-1) >= 0.5) & (occ_mask==255)
         out = (epe_flattened > 2.0)
         image_out = out[val].float().mean().item()
         image_epe = epe_flattened[val].mean().item()
