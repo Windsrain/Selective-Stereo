@@ -79,7 +79,6 @@ To train on ETH3D, run
 
 ```
 python train_stereo.py --restore_ckpt ./pretrained_models/sceneflow.pth --train_datasets eth3d_train --num_steps 300000 --image_size 384 512
-
 python train_stereo.py --restore_ckpt ./pretrained_models/eth3d_train.pth --tarin_datasets eth3d_finetune --num_steps 90000
 ```
 
@@ -87,6 +86,5 @@ To train on Middlebury, run
 
 ```
 python train_stereo.py --restore_ckpt ./pretrained_models/sceneflow.pth --train_datasets middlebury_train --num_steps 200000 --image_size 384 512
-
 python train_stereo.py --restore_ckpt ./pretrained_models/middlebury_train.pth --tarin_datasets middlebury_finetune --num_steps 100000 --image_size 384 768 --max_disp 768
 ```
