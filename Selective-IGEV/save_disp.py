@@ -61,7 +61,7 @@ if __name__ == '__main__':
     parser.add_argument('--output_directory', help="directory to save output", default=None)
     parser.add_argument('--mixed_precision', action='store_true', help='use mixed precision')
     parser.add_argument("--precision_dtype",default="float16",choices=["float16", "bfloat16", "float32"],help="Choose precision type: float16 or bfloat16 or float32")
-    parser.add_argument('--valid_iters', type=int, default=16, help='number of flow-field updates during forward pass')
+    parser.add_argument('--valid_iters', type=int, default=32, help='number of flow-field updates during forward pass')
 
     # Architecture choices
     parser.add_argument('--hidden_dims', nargs='+', type=int, default=[128]*3, help="hidden state and context dimensions")
