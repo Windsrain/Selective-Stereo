@@ -145,8 +145,8 @@ def validate_sceneflow(model, iters=32, mixed_prec=False):
     epe_list = np.array(epe_list)
     out_list = np.array(out_list)
 
-    epe = np.mean(epe_list)
-    d1 = 100 * np.mean(out_list)
+    epe = np.nanmean(epe_list)
+    d1 = 100 * np.nanmean(out_list)
 
     print("Validation Scene Flow: %f, %f" % (epe, d1))
     return {'scene-flow-epe': epe, 'scene-flow-d1': d1}
